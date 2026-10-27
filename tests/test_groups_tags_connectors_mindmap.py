@@ -123,8 +123,8 @@ async def test_list_and_create_tag(client: MiroClient) -> None:
     route = respx.post(f"{BASE}{B}/tags").mock(
         return_value=httpx.Response(201, json={"id": "t2"})
     )
-    await tags.create_tag(client, "b1", "urgent", fill_color="#ff0000")
-    assert body(route) == {"title": "urgent", "fillColor": "#ff0000"}
+    await tags.create_tag(client, "b1", "urgent", fill_color="red")
+    assert body(route) == {"title": "urgent", "fillColor": "red"}
 
 
 @respx.mock

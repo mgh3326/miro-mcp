@@ -105,7 +105,6 @@ async def test_update_item_position(client: MiroClient) -> None:
         "x": 5,
         "y": 6,
         "origin": "center",
-        "relativeTo": "canvas_center",
     }
 
 
