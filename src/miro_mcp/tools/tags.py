@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from ..client import MiroClient
-from ..registry import tool
+from ..registry import ESSENTIAL, tool
 from .common import cursor_result, drop_none, require_confirm
 
 log = logging.getLogger("miro_mcp")
@@ -75,7 +75,7 @@ async def delete_tag(
     return {"deleted": tag_id}
 
 
-@tool()
+@tool(profile=ESSENTIAL)
 async def attach_tag(
     client: MiroClient, board_id: str, item_id: str, tag_id: str
 ) -> dict[str, Any]:
