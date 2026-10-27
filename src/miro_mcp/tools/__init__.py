@@ -5,4 +5,14 @@ Each module groups one REST resource area; implementations take a
 ``MiroClient`` as their first argument and return JSON-serializable dicts.
 """
 
-from . import boards, connectors, groups, items, members, mindmap, misc, tags  # noqa: F401
+from . import (  # noqa: F401
+    boards,
+    connectors,
+    docs,
+    groups,
+    items,
+    members,
+    mindmap,
+    misc,
+    tags,
+)
