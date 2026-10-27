@@ -3,6 +3,10 @@
 Auth: the bearer token is resolved from the MIRO_ACCESS_TOKEN environment
 variable, or from the dotenv-style file at MIRO_ENV_FILE
 (default ~/.config/miro-mcp/miro.env). The token is never logged.
+
+Resilience: 429 responses are retried honoring Retry-After, with an adaptive
+exponential backoff that grows on consecutive throttled requests and resets on
+success. 502/503/504 are retried with plain exponential backoff.
 """
 
 from __future__ import annotations
@@ -10,8 +14,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -20,21 +25,24 @@ log = logging.getLogger("miro_mcp")
 MIRO_API_BASE = "https://api.miro.com"
 DEFAULT_ENV_FILE = "~/.config/miro-mcp/miro.env"
 
-MAX_RETRIES = 4
+MAX_RETRIES = 5
 BACKOFF_BASE_S = 1.0
 BACKOFF_MAX_S = 30.0
 
-# Header names Miro or intermediaries may use to report remaining credits.
+RETRYABLE_STATUSES = frozenset({429, 502, 503, 504})
+
+# Header names Miro or intermediaries may use to report rate-limit state.
 RATE_LIMIT_HEADERS = (
-    "x-miro-rate-limit-remaining",
+    "x-ratelimit-limit",
     "x-ratelimit-remaining",
-    "x-rate-limit-remaining",
+    "x-ratelimit-reset",
+    "x-miro-rate-limit-remaining",
     "x-credits-remaining",
 )
 
 
 class MiroError(RuntimeError):
-    """Base error raised by miro-mcp-lite."""
+    """Base error raised by miro-mcp."""
 
 
 class MiroAuthError(MiroError):
@@ -42,7 +50,7 @@ class MiroAuthError(MiroError):
 
 
 class MiroApiError(MiroError):
-    """A non-429 API error."""
+    """A non-retryable API error."""
 
     def __init__(self, status: int, message: str) -> None:
         self.status = status
@@ -111,6 +119,7 @@ class MiroClient:
         )
         #: Rate-limit headers observed on the most recent response, if any.
         self.rate_limit: dict[str, str] = {}
+        self._rl_strikes = 0
 
     async def aclose(self) -> None:
         await self._http.aclose()
@@ -125,22 +134,20 @@ class MiroClient:
         try:
             body = resp.json()
             if isinstance(body, dict):
-                return str(
-                    body.get("message") or body.get("error") or resp.text[:500]
-                )
+                return str(body.get("message") or body.get("error") or resp.text[:500])
         except Exception:
             pass
         return resp.text[:500] or resp.reason_phrase
 
-    @staticmethod
-    def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    def _throttle_delay(self, resp: httpx.Response) -> float:
+        """Adaptive backoff: Retry-After wins, else 2^strikes with a cap."""
         retry_after = resp.headers.get("retry-after")
         if retry_after is not None:
             try:
                 return min(max(float(retry_after), 0.0), BACKOFF_MAX_S)
             except ValueError:
                 pass
-        return float(min(BACKOFF_BASE_S * (2 ** (attempt - 1)), BACKOFF_MAX_S))
+        return float(min(BACKOFF_BASE_S * (2**self._rl_strikes), BACKOFF_MAX_S))
 
     async def request(
         self,
@@ -151,28 +158,146 @@ class MiroClient:
         json_body: Any = None,
         files: dict[str, Any] | None = None,
     ) -> Any:
-        """Send a request, retrying 429s per Retry-After / exponential backoff."""
+        """Send a request, retrying 429/502/503/504 per backoff rules."""
         attempt = 0
         while True:
             resp = await self._http.request(
                 method, path, params=params, json=json_body, files=files
             )
             self._capture_rate_headers(resp)
-            if resp.status_code == 429:
+            status = resp.status_code
+            if status in RETRYABLE_STATUSES:
                 if attempt >= MAX_RETRIES:
-                    raise MiroRateLimitError(429, self._error_message(resp))
+                    if status == 429:
+                        raise MiroRateLimitError(429, self._error_message(resp))
+                    raise MiroApiError(status, self._error_message(resp))
                 attempt += 1
-                delay = self._retry_delay(resp, attempt)
+                if status == 429:
+                    self._rl_strikes += 1
+                    delay = self._throttle_delay(resp)
+                else:
+                    delay = float(min(BACKOFF_BASE_S * attempt, BACKOFF_MAX_S))
                 log.warning(
-                    "Miro rate limit (429); retry %d/%d in %.2fs",
+                    "Miro %d; retry %d/%d in %.2fs",
+                    status,
                     attempt,
                     MAX_RETRIES,
                     delay,
                 )
                 await asyncio.sleep(delay)
                 continue
-            if resp.status_code >= 400:
-                raise MiroApiError(resp.status_code, self._error_message(resp))
-            if resp.status_code == 204 or not resp.content:
+            self._rl_strikes = 0
+            if status >= 400:
+                raise MiroApiError(status, self._error_message(resp))
+            if status == 204 or not resp.content:
                 return {}
             return resp.json()
+
+    async def get(
+        self, path: str, *, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], await self.request("GET", path, params=params))
+
+    async def post(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+        files: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            await self.request(
+                "POST", path, params=params, json_body=json_body, files=files
+            ),
+        )
+
+    async def put(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+    ) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            await self.request("PUT", path, params=params, json_body=json_body),
+        )
+
+    async def patch(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        json_body: Any = None,
+    ) -> dict[str, Any]:
+        return cast(
+            dict[str, Any],
+            await self.request("PATCH", path, params=params, json_body=json_body),
+        )
+
+    async def delete(
+        self, path: str, *, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return cast(dict[str, Any], await self.request("DELETE", path, params=params))
+
+    async def iter_cursor(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        max_pages: int | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield items from a Miro cursor-paginated endpoint.
+
+        Pages are shaped ``{"data": [...], "cursor": "..."}``; iteration stops
+        when the response carries no cursor or ``max_pages`` is reached.
+        """
+        p = dict(params or {})
+        cursor = p.pop("cursor", None)
+        pages = 0
+        while True:
+            if cursor:
+                p["cursor"] = cursor
+            page = await self.get(path, params=p)
+            pages += 1
+            data = page.get("data") or []
+            for item in data:
+                yield item
+            cursor = page.get("cursor")
+            if not cursor or (max_pages is not None and pages >= max_pages):
+                return
+
+    async def iter_offset(
+        self,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        limit: int = 20,
+        max_pages: int | None = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Yield items from a Miro offset-paginated endpoint.
+
+        Pages are shaped ``{"data": [...], "total": n, "offset": n}``; iteration
+        stops on an empty page, when ``total`` is reached, or ``max_pages``.
+        """
+        p = dict(params or {})
+        offset = int(p.pop("offset", 0) or 0)
+        p.setdefault("limit", limit)
+        pages = 0
+        while True:
+            p["offset"] = str(offset)
+            page = await self.get(path, params=p)
+            pages += 1
+            data = page.get("data") or []
+            for item in data:
+                yield item
+            offset += len(data)
+            total = page.get("total")
+            if (
+                not data
+                or (total is not None and offset >= int(total))
+                or (max_pages is not None and pages >= max_pages)
+            ):
+                return
