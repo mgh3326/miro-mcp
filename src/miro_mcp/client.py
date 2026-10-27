@@ -125,9 +125,7 @@ class MiroClient:
         try:
             body = resp.json()
             if isinstance(body, dict):
-                return str(
-                    body.get("message") or body.get("error") or resp.text[:500]
-                )
+                return str(body.get("message") or body.get("error") or resp.text[:500])
         except Exception:
             pass
         return resp.text[:500] or resp.reason_phrase
