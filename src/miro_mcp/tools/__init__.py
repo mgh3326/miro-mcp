@@ -9,6 +9,7 @@ from . import (  # noqa: F401
     boards,
     connectors,
     docs,
+    export,
     groups,
     items,
     members,
