@@ -6,7 +6,7 @@ import inspect
 import logging
 import os
 import sys
-from typing import Any
+from typing import Any, get_type_hints
 
 from mcp.server.fastmcp import FastMCP
 
@@ -43,7 +43,14 @@ def _make_wrapper(spec: ToolSpec) -> Any:
     """
     impl = spec.fn
     sig = inspect.signature(impl)
-    params = [p for p in sig.parameters.values() if p.name != "client"]
+    # Resolve string annotations (e.g. `from __future__ import annotations`,
+    # Literal aliases) in the impl's own module, then hide `client`.
+    hints = get_type_hints(impl, include_extras=True)
+    params = [
+        p.replace(annotation=hints.get(p.name, p.annotation))
+        for p in sig.parameters.values()
+        if p.name != "client"
+    ]
 
     async def wrapper(**kwargs: Any) -> Any:
         client = get_client()
@@ -58,19 +65,23 @@ def _make_wrapper(spec: ToolSpec) -> Any:
     return wrapper
 
 
-def install_tools(profile: str = "full") -> int:
+def install_tools(profile: str = "full", app: FastMCP | None = None) -> int:
     """Register tools on the FastMCP app for the given profile."""
+    app = app or mcp
     allowed = PROFILES.get(profile)
     if allowed is None:
         raise ValueError(
             f"unknown MIRO_MCP_PROFILE {profile!r}; expected one of {sorted(PROFILES)}"
         )
+    installed: set[str] = getattr(app, "_miro_installed", set())
     count = 0
     for spec in TOOLS.values():
-        if spec.profile not in allowed:
+        if spec.profile not in allowed or spec.name in installed:
             continue
-        mcp.add_tool(_make_wrapper(spec), name=spec.name)
+        app.add_tool(_make_wrapper(spec), name=spec.name)
+        installed.add(spec.name)
         count += 1
+    app._miro_installed = installed  # type: ignore[attr-defined]
     return count
 
 

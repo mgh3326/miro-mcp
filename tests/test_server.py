@@ -20,12 +20,16 @@ def test_registry_has_whoami() -> None:
 
 
 def test_install_tools_full_profile() -> None:
-    count = server.install_tools("full")
+    from mcp.server.fastmcp import FastMCP
+
+    count = server.install_tools("full", app=FastMCP("t"))
     assert count == len(TOOLS)
 
 
 def test_install_tools_essential_profile() -> None:
-    count = server.install_tools("essential")
+    from mcp.server.fastmcp import FastMCP
+
+    count = server.install_tools("essential", app=FastMCP("t"))
     essentials = sum(1 for s in TOOLS.values() if s.profile == "essential")
     assert count == essentials
 
@@ -36,8 +40,11 @@ def test_install_tools_bad_profile() -> None:
 
 
 async def test_tool_schema_hides_client_param() -> None:
-    server.install_tools("full")
-    tools = await server.mcp.list_tools()
+    from mcp.server.fastmcp import FastMCP
+
+    app = FastMCP("t")
+    server.install_tools("full", app=app)
+    tools = await app.list_tools()
     whoami = next(t for t in tools if t.name == "whoami")
     assert "client" not in whoami.inputSchema.get("properties", {})
 
