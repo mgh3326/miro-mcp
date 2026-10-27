@@ -31,9 +31,7 @@ def drop_none(d: dict[str, Any]) -> dict[str, Any]:
 def position(x: float | None, y: float | None) -> dict[str, Any] | None:
     if x is None and y is None:
         return None
-    return drop_none(
-        {"x": x, "y": y, "origin": "center", "relativeTo": "canvas_center"}
-    )
+    return drop_none({"x": x, "y": y, "origin": "center"})
 
 
 def geometry(

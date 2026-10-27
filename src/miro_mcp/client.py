@@ -134,7 +134,14 @@ class MiroClient:
         try:
             body = resp.json()
             if isinstance(body, dict):
-                return str(body.get("message") or body.get("error") or resp.text[:500])
+                msg = str(body.get("message") or body.get("error") or resp.text[:500])
+                fields = (body.get("context") or {}).get("fields") or []
+                details = "; ".join(
+                    f"{f.get('field')}: {f.get('message')}"
+                    for f in fields
+                    if isinstance(f, dict)
+                )
+                return f"{msg} ({details})" if details else msg
         except Exception:
             pass
         return resp.text[:500] or resp.reason_phrase

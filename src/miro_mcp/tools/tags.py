@@ -32,12 +32,14 @@ async def create_tag(
     client: MiroClient,
     board_id: str,
     title: str,
-    fill_color: str | None = None,
+    fill_color: str = "blue",
 ) -> dict[str, Any]:
-    """Create a tag. ``fill_color`` is a hex string like ``#24716f``."""
+    """Create a tag. ``fill_color`` (required by Miro) is a colour name:
+    red, light_green, cyan, yellow, magenta, green, blue, gray, violet,
+    dark_green, dark_blue or black."""
     return await client.post(
         f"/v2/boards/{board_id}/tags",
-        json_body=drop_none({"title": title, "fillColor": fill_color}),
+        json_body={"title": title, "fillColor": fill_color},
     )
 
 
