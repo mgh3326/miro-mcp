@@ -1,32 +1,45 @@
 [project]
-name = "miro-mcp-lite"
+name = "miro-mcp"
 version = "0.1.0"
-description = "Minimal Miro REST API v2 MCP server (stdio) for Claude Code sessions"
+description = "Open-source MCP server for the Miro REST API v2 (stdio), with the full public REST surface"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 dependencies = [
     "mcp==1.30.0",
     "httpx==0.28.1",
+    "pydantic==2.14.1",
 ]
 
 [project.scripts]
-miro-mcp-lite = "miro_mcp_lite.server:main"
+miro-mcp = "miro_mcp.server:main"
 
 [dependency-groups]
 dev = [
+    "mypy==2.4.0",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "respx==0.23.1",
+    "ruff==0.17.3",
 ]
 
 [build-system]
 requires = ["hatchling"]
-build-backend = "hatchling.backend"
+build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/miro_mcp_lite"]
+packages = ["src/miro_mcp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "C4", "PT"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true

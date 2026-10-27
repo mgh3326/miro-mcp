@@ -2,7 +2,7 @@
 
 Auth: the bearer token is resolved from the MIRO_ACCESS_TOKEN environment
 variable, or from the dotenv-style file at MIRO_ENV_FILE
-(default ~/.config/parking-arcade/miro.env). The token is never logged.
+(default ~/.config/miro-mcp/miro.env). The token is never logged.
 """
 
 from __future__ import annotations
@@ -15,10 +15,10 @@ from typing import Any
 
 import httpx
 
-log = logging.getLogger("miro_mcp_lite")
+log = logging.getLogger("miro_mcp")
 
 MIRO_API_BASE = "https://api.miro.com"
-DEFAULT_ENV_FILE = "~/.config/parking-arcade/miro.env"
+DEFAULT_ENV_FILE = "~/.config/miro-mcp/miro.env"
 
 MAX_RETRIES = 4
 BACKOFF_BASE_S = 1.0
@@ -140,7 +140,7 @@ class MiroClient:
                 return min(max(float(retry_after), 0.0), BACKOFF_MAX_S)
             except ValueError:
                 pass
-        return min(BACKOFF_BASE_S * (2 ** (attempt - 1)), BACKOFF_MAX_S)
+        return float(min(BACKOFF_BASE_S * (2 ** (attempt - 1)), BACKOFF_MAX_S))
 
     async def request(
         self,
